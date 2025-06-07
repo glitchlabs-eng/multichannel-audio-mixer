@@ -4,6 +4,8 @@ import { AudioEngine } from '@/services/AudioEngine';
 import { AudioFileLoader } from '@/services/AudioFileLoader';
 import { SessionManager, ProjectSession, SessionTemplate } from '@/services/SessionManager';
 import { RecordingSession, RecordingConfig, ExportOptions } from '@/services/AudioRecordingEngine';
+import { MIDIDevice, MIDIMapping, MIDIMessage, MIDILearnSession } from '@/services/MIDIEngine';
+import { VirtualInstrument } from '@/services/VirtualInstrumentEngine';
 import { AudioChannel, MasterSection, ProjectSettings, AudioEngineEvent, AudioDevice } from '@/types/audio';
 import MixerChannel from '@/components/MixerChannel';
 import MasterSectionComponent from '@/components/MasterSection';
@@ -11,6 +13,8 @@ import Toolbar from '@/components/Toolbar';
 import RecordingPanel from '@/components/RecordingPanel';
 import SessionBrowser from '@/components/SessionBrowser';
 import ExportDialog from '@/components/ExportDialog';
+import MIDIControlPanel from '@/components/MIDIControlPanel';
+import VirtualInstrumentPanel from '@/components/VirtualInstrumentPanel';
 import { createDefaultChannel, createDefaultMaster, createDefaultProject } from '@/utils/defaults';
 
 const AppContainer = styled.div`
@@ -78,6 +82,15 @@ const App: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
 
+  // MIDI state
+  const [midiDevices, setMidiDevices] = useState<MIDIDevice[]>([]);
+  const [midiMappings, setMidiMappings] = useState<MIDIMapping[]>([]);
+  const [midiLearnSession, setMidiLearnSession] = useState<MIDILearnSession | null>(null);
+  const [recentMidiMessages, setRecentMidiMessages] = useState<MIDIMessage[]>([]);
+
+  // Virtual Instrument state
+  const [virtualInstruments, setVirtualInstruments] = useState<VirtualInstrument[]>([]);
+
   // UI state
   const [showSessionBrowser, setShowSessionBrowser] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -110,6 +123,17 @@ const App: React.FC = () => {
         // Get available input devices
         const devices = engine.getAvailableInputDevices();
         setInputDevices(devices);
+
+        // Initialize MIDI state
+        const midiDevs = engine.getMIDIDevices();
+        setMidiDevices(midiDevs);
+
+        const mappings = engine.getMIDIMappings();
+        setMidiMappings(mappings);
+
+        // Initialize virtual instruments state
+        const instruments = engine.getVirtualInstruments();
+        setVirtualInstruments(instruments);
 
         setAudioEngine(engine);
         setIsEngineInitialized(true);
@@ -511,6 +535,111 @@ const App: React.FC = () => {
     }
   };
 
+  // MIDI handlers
+  const handleStartMIDILearn = (targetType: string, targetId: string, parameter: string) => {
+    if (!audioEngine) return;
+
+    const learnId = audioEngine.startMIDILearn(targetType, targetId, parameter);
+    if (learnId) {
+      const session = audioEngine.getMIDILearnSession();
+      setMidiLearnSession(session);
+      setStatusMessage(`MIDI Learn started for ${targetType}:${parameter}`);
+    }
+  };
+
+  const handleStopMIDILearn = () => {
+    if (!audioEngine) return;
+
+    audioEngine.stopMIDILearn();
+    setMidiLearnSession(null);
+    setStatusMessage('MIDI Learn stopped');
+  };
+
+  const handleRemoveMIDIMapping = (mappingId: string) => {
+    if (!audioEngine) return;
+
+    audioEngine.removeMIDIMapping(mappingId);
+    const updatedMappings = audioEngine.getMIDIMappings();
+    setMidiMappings(updatedMappings);
+    setStatusMessage('MIDI mapping removed');
+  };
+
+  const handleToggleMIDIMapping = (mappingId: string, enabled: boolean) => {
+    if (!audioEngine) return;
+
+    audioEngine.updateMIDIMapping(mappingId, { enabled });
+    const updatedMappings = audioEngine.getMIDIMappings();
+    setMidiMappings(updatedMappings);
+  };
+
+  const handleUpdateMIDIMapping = (mappingId: string, updates: Partial<MIDIMapping>) => {
+    if (!audioEngine) return;
+
+    audioEngine.updateMIDIMapping(mappingId, updates);
+    const updatedMappings = audioEngine.getMIDIMappings();
+    setMidiMappings(updatedMappings);
+  };
+
+  // Virtual Instrument handlers
+  const handleCreateVirtualInstrument = (type: 'synthesizer' | 'sampler' | 'drum_machine', name: string) => {
+    if (!audioEngine) return;
+
+    const instrumentId = audioEngine.createVirtualInstrument(type, name);
+    if (instrumentId) {
+      const updatedInstruments = audioEngine.getVirtualInstruments();
+      setVirtualInstruments(updatedInstruments);
+      setStatusMessage(`Created ${type}: ${name}`);
+    }
+  };
+
+  const handleRemoveVirtualInstrument = (instrumentId: string) => {
+    if (!audioEngine) return;
+
+    audioEngine.removeVirtualInstrument(instrumentId);
+    const updatedInstruments = audioEngine.getVirtualInstruments();
+    setVirtualInstruments(updatedInstruments);
+    setStatusMessage('Virtual instrument removed');
+  };
+
+  const handleToggleVirtualInstrument = (instrumentId: string, enabled: boolean) => {
+    if (!audioEngine) return;
+
+    // Update the instrument's enabled state
+    const updatedInstruments = virtualInstruments.map(inst =>
+      inst.id === instrumentId ? { ...inst, enabled } : inst
+    );
+    setVirtualInstruments(updatedInstruments);
+  };
+
+  const handleUpdateVirtualInstrumentParameter = (instrumentId: string, parameter: string, value: number) => {
+    if (!audioEngine) return;
+
+    audioEngine.updateVirtualInstrumentParameter(instrumentId, parameter, value);
+    const updatedInstruments = audioEngine.getVirtualInstruments();
+    setVirtualInstruments(updatedInstruments);
+  };
+
+  const handleLoadVirtualInstrumentPreset = (instrumentId: string, presetId: string) => {
+    if (!audioEngine) return;
+
+    audioEngine.loadVirtualInstrumentPreset(instrumentId, presetId);
+    const updatedInstruments = audioEngine.getVirtualInstruments();
+    setVirtualInstruments(updatedInstruments);
+    setStatusMessage('Preset loaded');
+  };
+
+  const handlePlayVirtualInstrumentNote = (instrumentId: string, note: number, velocity: number) => {
+    if (!audioEngine) return;
+
+    audioEngine.playVirtualInstrumentNote(instrumentId, note, velocity);
+  };
+
+  const handleStopVirtualInstrumentNote = (instrumentId: string, note: number) => {
+    if (!audioEngine) return;
+
+    audioEngine.stopVirtualInstrumentNote(instrumentId, note);
+  };
+
   return (
     <AppContainer>
       <Toolbar
@@ -552,6 +681,29 @@ const App: React.FC = () => {
               }
             }}
           />
+
+          <MIDIControlPanel
+            devices={midiDevices}
+            mappings={midiMappings}
+            learnSession={midiLearnSession}
+            recentMessages={recentMidiMessages}
+            onStartLearn={handleStartMIDILearn}
+            onStopLearn={handleStopMIDILearn}
+            onRemoveMapping={handleRemoveMIDIMapping}
+            onToggleMapping={handleToggleMIDIMapping}
+            onUpdateMapping={handleUpdateMIDIMapping}
+          />
+
+          <VirtualInstrumentPanel
+            instruments={virtualInstruments}
+            onCreateInstrument={handleCreateVirtualInstrument}
+            onRemoveInstrument={handleRemoveVirtualInstrument}
+            onToggleInstrument={handleToggleVirtualInstrument}
+            onUpdateParameter={handleUpdateVirtualInstrumentParameter}
+            onLoadPreset={handleLoadVirtualInstrumentPreset}
+            onPlayNote={handlePlayVirtualInstrumentNote}
+            onStopNote={handleStopVirtualInstrumentNote}
+          />
         </SidePanel>
 
         <ChannelsContainer>
@@ -567,6 +719,7 @@ const App: React.FC = () => {
               onConnectMicrophone={handleConnectMicrophone}
               onLoadAudioFile={handleLoadAudioFile}
               onStopChannel={handleStopChannel}
+              onStartMIDILearn={handleStartMIDILearn}
             />
           ))}
         </ChannelsContainer>

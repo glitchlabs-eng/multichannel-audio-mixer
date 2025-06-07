@@ -111,6 +111,7 @@ interface MixerChannelProps {
   onConnectMicrophone: (channelId: string, deviceId?: string) => void;
   onLoadAudioFile: (channelId: string, files: FileList) => void;
   onStopChannel: (channelId: string) => void;
+  onStartMIDILearn?: (targetType: string, targetId: string, parameter: string) => void;
 }
 
 const MixerChannel: React.FC<MixerChannelProps> = ({
@@ -123,6 +124,7 @@ const MixerChannel: React.FC<MixerChannelProps> = ({
   onConnectMicrophone,
   onLoadAudioFile,
   onStopChannel,
+  onStartMIDILearn,
 }) => {
   const [showEQ, setShowEQ] = useState(false);
   const [showInputSelector, setShowInputSelector] = useState(false);
@@ -202,15 +204,41 @@ const MixerChannel: React.FC<MixerChannelProps> = ({
         />
       )}
 
-      <Knob
-        value={channel.pan}
-        min={-1}
-        max={1}
-        step={0.1}
-        onChange={handlePanChange}
-        label="PAN"
-        size="medium"
-      />
+      <div style={{ position: 'relative' }}>
+        <Knob
+          value={channel.pan}
+          min={-1}
+          max={1}
+          step={0.1}
+          onChange={handlePanChange}
+          label="PAN"
+          size="medium"
+        />
+        {onStartMIDILearn && (
+          <button
+            style={{
+              position: 'absolute',
+              top: '-5px',
+              right: '-5px',
+              width: '12px',
+              height: '12px',
+              border: 'none',
+              borderRadius: '50%',
+              background: '#FF9800',
+              color: '#fff',
+              fontSize: '8px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onClick={() => onStartMIDILearn('channel', channel.id, 'pan')}
+            title="MIDI Learn Pan"
+          >
+            M
+          </button>
+        )}
+      </div>
 
       <ButtonRow>
         <Button
@@ -239,14 +267,40 @@ const MixerChannel: React.FC<MixerChannelProps> = ({
           />
         </MeterContainer>
 
-        <Fader
-          value={channel.gain}
-          min={0}
-          max={1}
-          step={0.01}
-          orientation="vertical"
-          onChange={handleGainChange}
-        />
+        <div style={{ position: 'relative' }}>
+          <Fader
+            value={channel.gain}
+            min={0}
+            max={1}
+            step={0.01}
+            orientation="vertical"
+            onChange={handleGainChange}
+          />
+          {onStartMIDILearn && (
+            <button
+              style={{
+                position: 'absolute',
+                top: '5px',
+                right: '-15px',
+                width: '12px',
+                height: '12px',
+                border: 'none',
+                borderRadius: '50%',
+                background: '#FF9800',
+                color: '#fff',
+                fontSize: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onClick={() => onStartMIDILearn('channel', channel.id, 'gain')}
+              title="MIDI Learn Gain"
+            >
+              M
+            </button>
+          )}
+        </div>
 
         <GainLabel>
           {gainInDb > -60 ? `${gainInDb.toFixed(1)}dB` : '-∞'}

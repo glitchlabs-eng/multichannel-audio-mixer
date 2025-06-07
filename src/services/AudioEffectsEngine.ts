@@ -384,6 +384,13 @@ export class AudioEffectsEngine {
     }
   }
 
+  updateEffect(id: string, parameters: Record<string, number>): void {
+    const processor = this.effectProcessors.get(id);
+    if (processor) {
+      processor.updateParameters(parameters);
+    }
+  }
+
   dispose(): void {
     this.effectProcessors.forEach(processor => processor.dispose());
     this.effectProcessors.clear();

@@ -10,6 +10,8 @@ import { audioDeviceManager } from './AudioDeviceManager';
 import { AudioEffectsEngine, EffectProcessor } from './AudioEffectsEngine';
 import { AdvancedEQProcessor, EQBand } from './AdvancedEQProcessor';
 import { AudioRecordingEngine, RecordingSession, RecordingConfig, ExportOptions } from './AudioRecordingEngine';
+import { MIDIEngine, MIDIDevice, MIDIMapping, MIDIMessage, MIDILearnSession } from './MIDIEngine';
+import { VirtualInstrumentEngine, VirtualInstrument } from './VirtualInstrumentEngine';
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -21,6 +23,8 @@ export class AudioEngine {
   private animationFrameId: number | null = null;
   private effectsEngine: AudioEffectsEngine | null = null;
   private recordingEngine: AudioRecordingEngine | null = null;
+  private midiEngine: MIDIEngine | null = null;
+  private virtualInstrumentEngine: VirtualInstrumentEngine | null = null;
 
   constructor(private config: AudioEngineConfig) {}
 
@@ -53,6 +57,19 @@ export class AudioEngine {
 
       // Initialize recording engine
       this.recordingEngine = new AudioRecordingEngine(this.audioContext);
+
+      // Initialize MIDI engine
+      this.midiEngine = new MIDIEngine();
+      try {
+        await this.midiEngine.initialize();
+        this.setupMIDIListeners();
+      } catch (error) {
+        console.warn('MIDI not available:', error);
+      }
+
+      // Initialize virtual instrument engine
+      this.virtualInstrumentEngine = new VirtualInstrumentEngine(this.audioContext);
+      this.virtualInstrumentEngine.getOutputNode().connect(this.masterGainNode);
 
       this.isInitialized = true;
       this.startLevelMonitoring();
@@ -317,6 +334,181 @@ export class AudioEngine {
     return this.recordingEngine.deleteSession(sessionId);
   }
 
+  // MIDI management
+  private setupMIDIListeners(): void {
+    if (!this.midiEngine) return;
+
+    // Listen for MIDI parameter changes
+    window.addEventListener('midiParameterChange', (event: any) => {
+      const { mapping, value } = event.detail;
+      this.handleMIDIParameterChange(mapping, value);
+    });
+
+    // Listen for MIDI messages for virtual instruments
+    this.midiEngine.addMessageListener((message: MIDIMessage) => {
+      this.handleMIDIMessage(message);
+    });
+  }
+
+  private handleMIDIParameterChange(mapping: MIDIMapping, value: number): void {
+    switch (mapping.targetType) {
+      case 'channel':
+        this.updateChannelParameter(mapping.targetId, mapping.parameter, value);
+        break;
+      case 'effect':
+        this.updateEffectParameter(mapping.targetId, mapping.parameter, value);
+        break;
+      case 'master':
+        this.updateMasterParameter(mapping.parameter, value);
+        break;
+      case 'instrument':
+        this.updateInstrumentParameter(mapping.targetId, mapping.parameter, value);
+        break;
+    }
+  }
+
+  private handleMIDIMessage(message: MIDIMessage): void {
+    // Route MIDI messages to virtual instruments
+    if (this.virtualInstrumentEngine) {
+      const instruments = this.virtualInstrumentEngine.getInstruments();
+      instruments.forEach(instrument => {
+        if (instrument.enabled) {
+          this.virtualInstrumentEngine!.processMIDI(instrument.id, message);
+        }
+      });
+    }
+  }
+
+  private updateChannelParameter(channelId: string, parameter: string, value: number): void {
+    const processor = this.channels.get(channelId);
+    if (!processor) return;
+
+    switch (parameter) {
+      case 'gain':
+        processor.setGain(value);
+        break;
+      case 'pan':
+        processor.setPan((value - 0.5) * 2); // Convert 0-1 to -1 to 1
+        break;
+      // Add more channel parameters as needed
+    }
+  }
+
+  private updateEffectParameter(effectId: string, parameter: string, value: number): void {
+    if (this.effectsEngine) {
+      this.effectsEngine.updateEffect(effectId, { [parameter]: value });
+    }
+  }
+
+  private updateMasterParameter(parameter: string, value: number): void {
+    switch (parameter) {
+      case 'mainGain':
+        if (this.masterGainNode) {
+          this.masterGainNode.gain.setValueAtTime(value, this.audioContext!.currentTime);
+        }
+        break;
+    }
+  }
+
+  private updateInstrumentParameter(instrumentId: string, parameter: string, value: number): void {
+    if (this.virtualInstrumentEngine) {
+      this.virtualInstrumentEngine.updateInstrumentParameter(instrumentId, parameter, value);
+    }
+  }
+
+  getMIDIDevices(): MIDIDevice[] {
+    if (!this.midiEngine) return [];
+    return this.midiEngine.getDevices();
+  }
+
+  getMIDIMappings(): MIDIMapping[] {
+    if (!this.midiEngine) return [];
+    return this.midiEngine.getMappings();
+  }
+
+  startMIDILearn(targetType: string, targetId: string, parameter: string): string | null {
+    if (!this.midiEngine) return null;
+    return this.midiEngine.startMIDILearn(targetType, targetId, parameter);
+  }
+
+  stopMIDILearn(): void {
+    if (this.midiEngine) {
+      this.midiEngine.stopMIDILearn();
+    }
+  }
+
+  getMIDILearnSession(): MIDILearnSession | null {
+    if (!this.midiEngine) return null;
+    return this.midiEngine.getLearnSession();
+  }
+
+  removeMIDIMapping(mappingId: string): void {
+    if (this.midiEngine) {
+      this.midiEngine.removeMapping(mappingId);
+    }
+  }
+
+  updateMIDIMapping(mappingId: string, updates: Partial<MIDIMapping>): void {
+    if (this.midiEngine) {
+      this.midiEngine.updateMapping(mappingId, updates);
+    }
+  }
+
+  // Virtual Instrument management
+  createVirtualInstrument(type: 'synthesizer' | 'sampler' | 'drum_machine', name: string): string | null {
+    if (!this.virtualInstrumentEngine) return null;
+    return this.virtualInstrumentEngine.createInstrument(type, name);
+  }
+
+  removeVirtualInstrument(instrumentId: string): void {
+    if (this.virtualInstrumentEngine) {
+      this.virtualInstrumentEngine.removeInstrument(instrumentId);
+    }
+  }
+
+  getVirtualInstruments(): VirtualInstrument[] {
+    if (!this.virtualInstrumentEngine) return [];
+    return this.virtualInstrumentEngine.getInstruments();
+  }
+
+  updateVirtualInstrumentParameter(instrumentId: string, parameter: string, value: number): void {
+    if (this.virtualInstrumentEngine) {
+      this.virtualInstrumentEngine.updateInstrumentParameter(instrumentId, parameter, value);
+    }
+  }
+
+  loadVirtualInstrumentPreset(instrumentId: string, presetId: string): void {
+    if (this.virtualInstrumentEngine) {
+      this.virtualInstrumentEngine.loadInstrumentPreset(instrumentId, presetId);
+    }
+  }
+
+  playVirtualInstrumentNote(instrumentId: string, note: number, velocity: number): void {
+    if (this.virtualInstrumentEngine) {
+      const message: MIDIMessage = {
+        type: 'noteOn',
+        channel: 1,
+        note,
+        velocity,
+        timestamp: Date.now(),
+      };
+      this.virtualInstrumentEngine.processMIDI(instrumentId, message);
+    }
+  }
+
+  stopVirtualInstrumentNote(instrumentId: string, note: number): void {
+    if (this.virtualInstrumentEngine) {
+      const message: MIDIMessage = {
+        type: 'noteOff',
+        channel: 1,
+        note,
+        velocity: 0,
+        timestamp: Date.now(),
+      };
+      this.virtualInstrumentEngine.processMIDI(instrumentId, message);
+    }
+  }
+
   addEventListener(listener: (event: AudioEngineEvent) => void): void {
     this.eventListeners.push(listener);
   }
@@ -365,6 +557,26 @@ export class AudioEngine {
 
     this.channels.forEach(processor => processor.disconnect());
     this.channels.clear();
+
+    // Dispose effects engine
+    if (this.effectsEngine) {
+      this.effectsEngine.dispose();
+    }
+
+    // Dispose recording engine
+    if (this.recordingEngine) {
+      this.recordingEngine.dispose();
+    }
+
+    // Dispose MIDI engine
+    if (this.midiEngine) {
+      this.midiEngine.dispose();
+    }
+
+    // Dispose virtual instrument engine
+    if (this.virtualInstrumentEngine) {
+      this.virtualInstrumentEngine.dispose();
+    }
 
     if (this.audioContext) {
       this.audioContext.close();
@@ -622,5 +834,16 @@ class ChannelProcessor {
 
   getOutputNode(): AudioNode {
     return this.analyzerNode;
+  }
+
+  // MIDI control methods
+  setGain(value: number): void {
+    this.gainNode.gain.setValueAtTime(value, this.audioContext.currentTime);
+    this.channel.gain = value;
+  }
+
+  setPan(value: number): void {
+    this.panNode.pan.setValueAtTime(value, this.audioContext.currentTime);
+    this.channel.pan = value;
   }
 }
