@@ -85,25 +85,36 @@ interface ToolbarProps {
   onAddChannel: () => void;
   isEngineReady: boolean;
   projectName: string;
+  onShowSessionBrowser?: () => void;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
   onAddChannel,
   isEngineReady,
   projectName,
+  onShowSessionBrowser,
 }) => {
   return (
     <ToolbarContainer>
       <ProjectTitle>{projectName}</ProjectTitle>
       
-      <Button 
-        variant="primary" 
+      {onShowSessionBrowser && (
+        <Button
+          variant="secondary"
+          onClick={onShowSessionBrowser}
+        >
+          Sessions
+        </Button>
+      )}
+
+      <Button
+        variant="primary"
         onClick={onAddChannel}
         disabled={!isEngineReady}
       >
         + Add Channel
       </Button>
-      
+
       <Button variant="secondary">
         Record
       </Button>

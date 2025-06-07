@@ -9,6 +9,7 @@ import {
 import { audioDeviceManager } from './AudioDeviceManager';
 import { AudioEffectsEngine, EffectProcessor } from './AudioEffectsEngine';
 import { AdvancedEQProcessor, EQBand } from './AdvancedEQProcessor';
+import { AudioRecordingEngine, RecordingSession, RecordingConfig, ExportOptions } from './AudioRecordingEngine';
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -19,6 +20,7 @@ export class AudioEngine {
   private isInitialized = false;
   private animationFrameId: number | null = null;
   private effectsEngine: AudioEffectsEngine | null = null;
+  private recordingEngine: AudioRecordingEngine | null = null;
 
   constructor(private config: AudioEngineConfig) {}
 
@@ -48,6 +50,9 @@ export class AudioEngine {
 
       // Initialize effects engine
       this.effectsEngine = new AudioEffectsEngine(this.audioContext);
+
+      // Initialize recording engine
+      this.recordingEngine = new AudioRecordingEngine(this.audioContext);
 
       this.isInitialized = true;
       this.startLevelMonitoring();
@@ -242,6 +247,74 @@ export class AudioEngine {
   getChannelSpectrum(channelId: string): { frequencies: Float32Array; magnitudes: Float32Array } | null {
     const processor = this.channels.get(channelId);
     return processor ? processor.getSpectrumData() : null;
+  }
+
+  // Recording management
+  createRecordingSession(name: string, config: RecordingConfig): RecordingSession | null {
+    if (!this.recordingEngine) return null;
+    return this.recordingEngine.createSession(name, config);
+  }
+
+  startRecording(sessionId: string, channelIds: string[]): void {
+    if (!this.recordingEngine) return;
+
+    // Connect channels for recording
+    channelIds.forEach(channelId => {
+      const processor = this.channels.get(channelId);
+      if (processor) {
+        this.recordingEngine!.connectChannelForRecording(channelId, processor.getOutputNode());
+      }
+    });
+
+    this.recordingEngine.startRecording(sessionId, channelIds);
+  }
+
+  stopRecording(): RecordingSession | null {
+    if (!this.recordingEngine) return null;
+    return this.recordingEngine.stopRecording();
+  }
+
+  pauseRecording(): void {
+    if (this.recordingEngine) {
+      this.recordingEngine.pauseRecording();
+    }
+  }
+
+  resumeRecording(): void {
+    if (this.recordingEngine) {
+      this.recordingEngine.resumeRecording();
+    }
+  }
+
+  getRecordingStatus(): { isRecording: boolean; session: RecordingSession | null; duration: number } {
+    if (!this.recordingEngine) {
+      return { isRecording: false, session: null, duration: 0 };
+    }
+    return this.recordingEngine.getRecordingStatus();
+  }
+
+  getRecordingSessions(): RecordingSession[] {
+    if (!this.recordingEngine) return [];
+    return this.recordingEngine.getSessions();
+  }
+
+  async exportRecordingSession(sessionId: string, options: ExportOptions): Promise<Blob> {
+    if (!this.recordingEngine) {
+      throw new Error('Recording engine not initialized');
+    }
+    return this.recordingEngine.exportSession(sessionId, options);
+  }
+
+  async exportRecordingTrack(sessionId: string, trackId: string, options: ExportOptions): Promise<Blob> {
+    if (!this.recordingEngine) {
+      throw new Error('Recording engine not initialized');
+    }
+    return this.recordingEngine.exportTrack(sessionId, trackId, options);
+  }
+
+  deleteRecordingSession(sessionId: string): boolean {
+    if (!this.recordingEngine) return false;
+    return this.recordingEngine.deleteSession(sessionId);
   }
 
   addEventListener(listener: (event: AudioEngineEvent) => void): void {
@@ -545,5 +618,9 @@ class ChannelProcessor {
 
   getSpectrumData(): { frequencies: Float32Array; magnitudes: Float32Array } {
     return this.advancedEQ.getSpectrumData();
+  }
+
+  getOutputNode(): AudioNode {
+    return this.analyzerNode;
   }
 }

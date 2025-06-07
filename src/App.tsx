@@ -2,10 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { AudioEngine } from '@/services/AudioEngine';
 import { AudioFileLoader } from '@/services/AudioFileLoader';
+import { SessionManager, ProjectSession, SessionTemplate } from '@/services/SessionManager';
+import { RecordingSession, RecordingConfig, ExportOptions } from '@/services/AudioRecordingEngine';
 import { AudioChannel, MasterSection, ProjectSettings, AudioEngineEvent, AudioDevice } from '@/types/audio';
 import MixerChannel from '@/components/MixerChannel';
 import MasterSectionComponent from '@/components/MasterSection';
 import Toolbar from '@/components/Toolbar';
+import RecordingPanel from '@/components/RecordingPanel';
+import SessionBrowser from '@/components/SessionBrowser';
+import ExportDialog from '@/components/ExportDialog';
 import { createDefaultChannel, createDefaultMaster, createDefaultProject } from '@/utils/defaults';
 
 const AppContainer = styled.div`
@@ -20,6 +25,15 @@ const MixerContainer = styled.div`
   display: flex;
   flex: 1;
   overflow: hidden;
+`;
+
+const SidePanel = styled.div`
+  width: 300px;
+  min-width: 300px;
+  background: #1a1a1a;
+  border-right: 1px solid #333;
+  overflow-y: auto;
+  padding: 8px;
 `;
 
 const ChannelsContainer = styled.div`
@@ -52,10 +66,22 @@ const StatusBar = styled.div`
 const App: React.FC = () => {
   const [audioEngine, setAudioEngine] = useState<AudioEngine | null>(null);
   const [audioFileLoader, setAudioFileLoader] = useState<AudioFileLoader | null>(null);
+  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
   const [project, setProject] = useState<ProjectSettings>(createDefaultProject());
+  const [currentSession, setCurrentSession] = useState<ProjectSession | null>(null);
   const [isEngineInitialized, setIsEngineInitialized] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Initializing audio engine...');
   const [inputDevices, setInputDevices] = useState<AudioDevice[]>([]);
+
+  // Recording state
+  const [recordingSession, setRecordingSession] = useState<RecordingSession | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+
+  // UI state
+  const [showSessionBrowser, setShowSessionBrowser] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportSession, setExportSession] = useState<RecordingSession | null>(null);
 
   // Initialize audio engine
   useEffect(() => {
@@ -77,6 +103,10 @@ const App: React.FC = () => {
           setAudioFileLoader(fileLoader);
         }
 
+        // Initialize session manager
+        const manager = new SessionManager();
+        setSessionManager(manager);
+
         // Get available input devices
         const devices = engine.getAvailableInputDevices();
         setInputDevices(devices);
@@ -96,8 +126,29 @@ const App: React.FC = () => {
       if (audioEngine) {
         audioEngine.dispose();
       }
+      if (sessionManager) {
+        sessionManager.dispose();
+      }
     };
   }, []);
+
+  // Update recording duration
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    if (isRecording && audioEngine) {
+      interval = setInterval(() => {
+        const status = audioEngine.getRecordingStatus();
+        setRecordingDuration(status.duration);
+      }, 100);
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isRecording, audioEngine]);
 
   // Setup menu event listeners
   useEffect(() => {
@@ -318,15 +369,191 @@ const App: React.FC = () => {
     }
   };
 
+  // Recording handlers
+  const handleStartRecording = (sessionName: string, config: RecordingConfig, channelIds: string[]) => {
+    if (!audioEngine) return;
+
+    try {
+      const session = audioEngine.createRecordingSession(sessionName, config);
+      if (session) {
+        audioEngine.startRecording(session.id, channelIds);
+        setRecordingSession(session);
+        setIsRecording(true);
+        setStatusMessage(`Recording started: ${sessionName}`);
+      }
+    } catch (error) {
+      setStatusMessage(`Failed to start recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (!audioEngine) return;
+
+    try {
+      const session = audioEngine.stopRecording();
+      if (session && sessionManager && currentSession) {
+        sessionManager.addRecordingToSession(currentSession.id, session);
+        setStatusMessage(`Recording stopped. Duration: ${session.duration.toFixed(2)}s`);
+      }
+      setIsRecording(false);
+      setRecordingDuration(0);
+    } catch (error) {
+      setStatusMessage(`Failed to stop recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handlePauseRecording = () => {
+    if (audioEngine) {
+      audioEngine.pauseRecording();
+      setStatusMessage('Recording paused');
+    }
+  };
+
+  const handleResumeRecording = () => {
+    if (audioEngine) {
+      audioEngine.resumeRecording();
+      setStatusMessage('Recording resumed');
+    }
+  };
+
+  const handleExportSession = async (sessionId: string, options: ExportOptions) => {
+    if (!audioEngine) return;
+
+    try {
+      setStatusMessage('Exporting session...');
+      const blob = await audioEngine.exportRecordingSession(sessionId, options);
+
+      // Download the exported file
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `session_${sessionId}.${options.format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setStatusMessage('Session exported successfully');
+    } catch (error) {
+      setStatusMessage(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Session management handlers
+  const handleLoadSession = (sessionId: string) => {
+    if (!sessionManager) return;
+
+    const session = sessionManager.loadSession(sessionId);
+    if (session) {
+      setCurrentSession(session);
+      setProject(session.settings);
+      setStatusMessage(`Loaded session: ${session.name}`);
+      setShowSessionBrowser(false);
+    }
+  };
+
+  const handleCreateFromTemplate = (template: SessionTemplate) => {
+    if (!sessionManager) return;
+
+    const session = sessionManager.createSession(template.name, template);
+    setCurrentSession(session);
+    setProject(session.settings);
+    setStatusMessage(`Created session from template: ${template.name}`);
+    setShowSessionBrowser(false);
+  };
+
+  const handleDeleteSession = (sessionId: string) => {
+    if (!sessionManager) return;
+
+    if (sessionManager.deleteSession(sessionId)) {
+      setStatusMessage('Session deleted');
+    }
+  };
+
+  const handleDuplicateSession = (sessionId: string, newName: string) => {
+    if (!sessionManager) return;
+
+    const duplicated = sessionManager.duplicateSession(sessionId, newName);
+    if (duplicated) {
+      setStatusMessage(`Session duplicated: ${newName}`);
+    }
+  };
+
+  const handleExportSessionData = (sessionId: string) => {
+    if (!sessionManager) return;
+
+    try {
+      const sessionData = sessionManager.exportSession(sessionId);
+      const blob = new Blob([sessionData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `session_${sessionId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setStatusMessage('Session data exported');
+    } catch (error) {
+      setStatusMessage(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handleImportSession = (sessionData: string) => {
+    if (!sessionManager) return;
+
+    try {
+      const session = sessionManager.importSession(sessionData);
+      setStatusMessage(`Session imported: ${session.name}`);
+    } catch (error) {
+      setStatusMessage(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   return (
     <AppContainer>
-      <Toolbar 
+      <Toolbar
         onAddChannel={handleAddChannel}
         isEngineReady={isEngineInitialized}
-        projectName={project.name}
+        projectName={currentSession?.name || project.name}
+        onShowSessionBrowser={() => setShowSessionBrowser(true)}
       />
-      
+
+      {showSessionBrowser && sessionManager && (
+        <SessionBrowser
+          sessions={sessionManager.getAllSessions()}
+          templates={sessionManager.getSessionTemplates()}
+          onLoadSession={handleLoadSession}
+          onDeleteSession={handleDeleteSession}
+          onDuplicateSession={handleDuplicateSession}
+          onCreateFromTemplate={handleCreateFromTemplate}
+          onExportSession={handleExportSessionData}
+          onImportSession={handleImportSession}
+        />
+      )}
+
       <MixerContainer>
+        <SidePanel>
+          <RecordingPanel
+            channels={project.channels}
+            currentSession={recordingSession}
+            isRecording={isRecording}
+            recordingDuration={recordingDuration}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
+            onPauseRecording={handlePauseRecording}
+            onResumeRecording={handleResumeRecording}
+            onExportSession={(sessionId, options) => {
+              const session = audioEngine?.getRecordingSessions().find(s => s.id === sessionId);
+              if (session) {
+                setExportSession(session);
+                setShowExportDialog(true);
+              }
+            }}
+          />
+        </SidePanel>
+
         <ChannelsContainer>
           {project.channels.map(channel => (
             <MixerChannel
@@ -343,7 +570,7 @@ const App: React.FC = () => {
             />
           ))}
         </ChannelsContainer>
-        
+
         <MasterContainer>
           <MasterSectionComponent
             master={project.master}
@@ -351,7 +578,29 @@ const App: React.FC = () => {
           />
         </MasterContainer>
       </MixerContainer>
-      
+
+      {showExportDialog && exportSession && (
+        <ExportDialog
+          session={exportSession}
+          isOpen={showExportDialog}
+          onClose={() => {
+            setShowExportDialog(false);
+            setExportSession(null);
+          }}
+          onExport={async (options, trackIds) => {
+            if (trackIds && trackIds.length > 0) {
+              // Export individual tracks
+              for (const trackId of trackIds) {
+                await audioEngine?.exportRecordingTrack(exportSession.id, trackId, options);
+              }
+            } else {
+              // Export full session
+              await handleExportSession(exportSession.id, options);
+            }
+          }}
+        />
+      )}
+
       <StatusBar>
         {statusMessage}
       </StatusBar>
