@@ -103,7 +103,8 @@ Object.defineProperty(navigator, 'mediaDevices', {
 });
 
 // Mock Electron API
-global.window.electronAPI = {
+(global as any).window = (global as any).window || {};
+(global as any).window.electronAPI = {
   saveProject: jest.fn().mockResolvedValue({ success: true }),
   loadProject: jest.fn().mockResolvedValue({ success: true, data: {} }),
   importAudioFile: jest.fn().mockResolvedValue({ success: true, filePaths: [] }),

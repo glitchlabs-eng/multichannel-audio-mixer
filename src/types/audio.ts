@@ -26,6 +26,8 @@ export interface AudioSource {
   deviceId?: string;
   filePath?: string;
   buffer?: AudioBuffer;
+  stream?: MediaStream;
+  isPlaying?: boolean;
 }
 
 export interface EQSettings {

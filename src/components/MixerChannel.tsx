@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import { AudioChannel } from '@/types/audio';
+import { AudioChannel, AudioDevice } from '@/types/audio';
 import Fader from './Fader';
 import Knob from './Knob';
 import AudioMeter from './AudioMeter';
+import AudioInputSelector, { InputType } from './AudioInputSelector';
 import { linearToDb } from '@/utils/defaults';
 
 const ChannelContainer = styled.div`
@@ -102,20 +103,31 @@ const GainLabel = styled.div`
 
 interface MixerChannelProps {
   channel: AudioChannel;
+  inputDevices: AudioDevice[];
   onChannelUpdate: (channelId: string, updates: Partial<AudioChannel>) => void;
   onSolo: (channelId: string) => void;
   onMute: (channelId: string) => void;
   onRemove: (channelId: string) => void;
+  onConnectMicrophone: (channelId: string, deviceId?: string) => void;
+  onLoadAudioFile: (channelId: string, files: FileList) => void;
+  onStopChannel: (channelId: string) => void;
 }
 
 const MixerChannel: React.FC<MixerChannelProps> = ({
   channel,
+  inputDevices,
   onChannelUpdate,
   onSolo,
   onMute,
   onRemove,
+  onConnectMicrophone,
+  onLoadAudioFile,
+  onStopChannel,
 }) => {
   const [showEQ, setShowEQ] = useState(false);
+  const [showInputSelector, setShowInputSelector] = useState(false);
+  const [inputType, setInputType] = useState<InputType>('none');
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onChannelUpdate(channel.id, { name: e.target.value });
@@ -129,6 +141,41 @@ const MixerChannel: React.FC<MixerChannelProps> = ({
     onChannelUpdate(channel.id, { pan: value });
   };
 
+  const handleInputTypeChange = async (type: InputType) => {
+    setInputType(type);
+    setConnectionStatus('idle');
+
+    if (type === 'none') {
+      onStopChannel(channel.id);
+    }
+  };
+
+  const handleDeviceChange = async (deviceId: string) => {
+    if (inputType === 'microphone' && deviceId) {
+      setConnectionStatus('connecting');
+      try {
+        await onConnectMicrophone(channel.id, deviceId);
+        setConnectionStatus('connected');
+      } catch (error) {
+        setConnectionStatus('error');
+        console.error('Failed to connect microphone:', error);
+      }
+    }
+  };
+
+  const handleFileSelect = (files: FileList) => {
+    if (files.length > 0) {
+      setConnectionStatus('connecting');
+      try {
+        onLoadAudioFile(channel.id, files);
+        setConnectionStatus('connected');
+      } catch (error) {
+        setConnectionStatus('error');
+        console.error('Failed to load audio file:', error);
+      }
+    }
+  };
+
   const gainInDb = linearToDb(channel.gain);
 
   return (
@@ -138,6 +185,22 @@ const MixerChannel: React.FC<MixerChannelProps> = ({
         onChange={handleNameChange}
         placeholder="Channel"
       />
+
+      <Button onClick={() => setShowInputSelector(!showInputSelector)}>
+        INPUT
+      </Button>
+
+      {showInputSelector && (
+        <AudioInputSelector
+          inputDevices={inputDevices}
+          selectedDeviceId={channel.inputSource?.deviceId}
+          inputType={inputType}
+          connectionStatus={connectionStatus}
+          onInputTypeChange={handleInputTypeChange}
+          onDeviceChange={handleDeviceChange}
+          onFileSelect={handleFileSelect}
+        />
+      )}
 
       <Knob
         value={channel.pan}

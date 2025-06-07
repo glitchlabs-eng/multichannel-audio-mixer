@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { AudioEngine } from '@/services/AudioEngine';
-import { AudioChannel, MasterSection, ProjectSettings, AudioEngineEvent } from '@/types/audio';
+import { AudioFileLoader } from '@/services/AudioFileLoader';
+import { AudioChannel, MasterSection, ProjectSettings, AudioEngineEvent, AudioDevice } from '@/types/audio';
 import MixerChannel from '@/components/MixerChannel';
 import MasterSectionComponent from '@/components/MasterSection';
 import Toolbar from '@/components/Toolbar';
@@ -50,9 +51,11 @@ const StatusBar = styled.div`
 
 const App: React.FC = () => {
   const [audioEngine, setAudioEngine] = useState<AudioEngine | null>(null);
+  const [audioFileLoader, setAudioFileLoader] = useState<AudioFileLoader | null>(null);
   const [project, setProject] = useState<ProjectSettings>(createDefaultProject());
   const [isEngineInitialized, setIsEngineInitialized] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Initializing audio engine...');
+  const [inputDevices, setInputDevices] = useState<AudioDevice[]>([]);
 
   // Initialize audio engine
   useEffect(() => {
@@ -66,7 +69,18 @@ const App: React.FC = () => {
 
         engine.addEventListener(handleAudioEngineEvent);
         await engine.initialize();
-        
+
+        // Initialize audio file loader
+        const audioContext = (engine as any).audioContext;
+        if (audioContext) {
+          const fileLoader = new AudioFileLoader(audioContext);
+          setAudioFileLoader(fileLoader);
+        }
+
+        // Get available input devices
+        const devices = engine.getAvailableInputDevices();
+        setInputDevices(devices);
+
         setAudioEngine(engine);
         setIsEngineInitialized(true);
         setStatusMessage('Audio engine ready');
@@ -260,6 +274,50 @@ const App: React.FC = () => {
     }
   };
 
+  const handleConnectMicrophone = async (channelId: string, deviceId?: string) => {
+    if (audioEngine) {
+      try {
+        await audioEngine.connectMicrophoneInput(channelId, deviceId);
+        setStatusMessage(`Microphone connected to ${project.channels.find(ch => ch.id === channelId)?.name}`);
+      } catch (error) {
+        setStatusMessage(`Failed to connect microphone: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw error;
+      }
+    }
+  };
+
+  const handleLoadAudioFile = async (channelId: string, files: FileList) => {
+    if (audioEngine && audioFileLoader) {
+      try {
+        const file = files[0]; // Use first file
+        const { buffer, info } = await audioFileLoader.loadFromFile(file);
+
+        await audioEngine.playAudioBuffer(channelId, buffer, false);
+
+        // Update channel with file info
+        handleChannelUpdate(channelId, {
+          inputSource: {
+            type: 'file',
+            filePath: info.name,
+            buffer,
+          },
+        });
+
+        setStatusMessage(`Loaded ${info.name} (${audioFileLoader.formatDuration(info.duration)})`);
+      } catch (error) {
+        setStatusMessage(`Failed to load audio file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw error;
+      }
+    }
+  };
+
+  const handleStopChannel = (channelId: string) => {
+    if (audioEngine) {
+      audioEngine.stopChannel(channelId);
+      setStatusMessage(`Stopped ${project.channels.find(ch => ch.id === channelId)?.name}`);
+    }
+  };
+
   return (
     <AppContainer>
       <Toolbar 
@@ -274,10 +332,14 @@ const App: React.FC = () => {
             <MixerChannel
               key={channel.id}
               channel={channel}
+              inputDevices={inputDevices}
               onChannelUpdate={handleChannelUpdate}
               onSolo={handleSolo}
               onMute={(channelId) => handleChannelUpdate(channelId, { muted: !channel.muted })}
               onRemove={handleChannelRemove}
+              onConnectMicrophone={handleConnectMicrophone}
+              onLoadAudioFile={handleLoadAudioFile}
+              onStopChannel={handleStopChannel}
             />
           ))}
         </ChannelsContainer>

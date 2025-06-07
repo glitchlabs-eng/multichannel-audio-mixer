@@ -1,11 +1,12 @@
-import { 
-  AudioChannel, 
-  AudioEngineConfig, 
-  AudioEngineEvent, 
-  AudioLevel, 
+import {
+  AudioChannel,
+  AudioEngineConfig,
+  AudioEngineEvent,
+  AudioLevel,
   MasterSection,
-  AudioAnalyzer 
+  AudioAnalyzer
 } from '@/types/audio';
+import { audioDeviceManager } from './AudioDeviceManager';
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -20,10 +21,18 @@ export class AudioEngine {
 
   async initialize(): Promise<void> {
     try {
+      // Initialize audio device manager
+      await audioDeviceManager.getAvailableDevices();
+
       this.audioContext = new AudioContext({
         sampleRate: this.config.sampleRate,
         latencyHint: this.config.latency,
       });
+
+      // Resume audio context if suspended (required by some browsers)
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
 
       // Create master gain node
       this.masterGainNode = this.audioContext.createGain();
@@ -121,6 +130,60 @@ export class AudioEngine {
     }
   }
 
+  async connectMicrophoneInput(channelId: string, deviceId?: string): Promise<void> {
+    if (!this.audioContext) {
+      throw new Error('Audio engine not initialized');
+    }
+
+    try {
+      const stream = await audioDeviceManager.getInputStream(deviceId);
+      const processor = this.channels.get(channelId);
+
+      if (processor) {
+        processor.connectInputStream(stream);
+        this.emitEvent({
+          type: 'DEVICE_CONNECTED',
+          device: audioDeviceManager.getDeviceById(deviceId || 'default') || {
+            id: 'default',
+            name: 'Default Microphone',
+            type: 'input',
+            channelCount: 2,
+            sampleRate: 44100,
+          }
+        });
+      }
+    } catch (error) {
+      this.emitEvent({ type: 'ERROR', message: `Failed to connect microphone: ${error instanceof Error ? error.message : 'Unknown error'}` });
+      throw error;
+    }
+  }
+
+  async playAudioBuffer(channelId: string, buffer: AudioBuffer, loop: boolean = false): Promise<void> {
+    if (!this.audioContext) {
+      throw new Error('Audio engine not initialized');
+    }
+
+    const processor = this.channels.get(channelId);
+    if (processor) {
+      processor.playAudioBuffer(buffer, loop);
+    }
+  }
+
+  stopChannel(channelId: string): void {
+    const processor = this.channels.get(channelId);
+    if (processor) {
+      processor.stop();
+    }
+  }
+
+  getAvailableInputDevices() {
+    return audioDeviceManager.getInputDevices();
+  }
+
+  getAvailableOutputDevices() {
+    return audioDeviceManager.getOutputDevices();
+  }
+
   addEventListener(listener: (event: AudioEngineEvent) => void): void {
     this.eventListeners.push(listener);
   }
@@ -184,6 +247,8 @@ class ChannelProcessor {
   private eqNodes: { high: BiquadFilterNode; mid: BiquadFilterNode; low: BiquadFilterNode };
   private analyzerNode: AnalyserNode;
   private sourceNode: AudioBufferSourceNode | MediaStreamAudioSourceNode | null = null;
+  private inputStream: MediaStream | null = null;
+  private isPlaying: boolean = false;
 
   constructor(
     private audioContext: AudioContext,
@@ -271,11 +336,70 @@ class ChannelProcessor {
     this.analyzerNode.connect(destination);
   }
 
-  disconnect(): void {
+  connectInputStream(stream: MediaStream): void {
+    // Disconnect existing source
+    this.disconnect();
+
+    // Create media stream source
+    this.sourceNode = this.audioContext.createMediaStreamSource(stream);
+    this.inputStream = stream;
+
+    // Connect to audio chain
+    this.sourceNode.connect(this.eqNodes.high);
+    this.isPlaying = true;
+  }
+
+  playAudioBuffer(buffer: AudioBuffer, loop: boolean = false): void {
+    // Disconnect existing source
+    this.disconnect();
+
+    // Create buffer source
+    const bufferSource = this.audioContext.createBufferSource();
+    bufferSource.buffer = buffer;
+    bufferSource.loop = loop;
+
+    // Connect to audio chain
+    bufferSource.connect(this.eqNodes.high);
+    this.sourceNode = bufferSource;
+
+    // Start playback
+    bufferSource.start();
+    this.isPlaying = true;
+
+    // Handle end of playback
+    bufferSource.onended = () => {
+      this.isPlaying = false;
+    };
+  }
+
+  stop(): void {
     if (this.sourceNode) {
+      if (this.sourceNode instanceof AudioBufferSourceNode) {
+        try {
+          this.sourceNode.stop();
+        } catch (error) {
+          // Source might already be stopped
+        }
+      }
       this.sourceNode.disconnect();
+      this.sourceNode = null;
     }
+
+    if (this.inputStream) {
+      this.inputStream.getTracks().forEach(track => track.stop());
+      this.inputStream = null;
+    }
+
+    this.isPlaying = false;
+  }
+
+  disconnect(): void {
+    this.stop();
     this.analyzerNode.disconnect();
+  }
+
+  isChannelPlaying(): boolean {
+    return this.isPlaying;
   }
 
   getLevel(): AudioLevel {

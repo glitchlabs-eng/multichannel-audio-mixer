@@ -37,6 +37,9 @@
   "exclude": [
     "node_modules",
     "dist",
-    "release"
+    "release",
+    "src/**/*.test.*",
+    "src/**/__tests__/**/*",
+    "src/setupTests.ts"
   ]
 }
