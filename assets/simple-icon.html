@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Mixer Icon Generator</title>
+</head>
+<body>
+    <h2>Professional Audio Mixer Icon Generator</h2>
+    <canvas id="iconCanvas" width="512" height="512" style="border: 1px solid #ccc; background: white;"></canvas>
+    <br><br>
+    <button onclick="downloadIcon('icon-512.png')">Download 512x512 PNG</button>
+    <button onclick="downloadIcon('icon-256.png', 256)">Download 256x256 PNG</button>
+    <button onclick="downloadIcon('icon-128.png', 128)">Download 128x128 PNG</button>
+    <button onclick="downloadIcon('icon-64.png', 64)">Download 64x64 PNG</button>
+    <button onclick="downloadIcon('icon-32.png', 32)">Download 32x32 PNG</button>
+    <button onclick="downloadIcon('icon-16.png', 16)">Download 16x16 PNG</button>
+    
+    <script>
+        const canvas = document.getElementById('iconCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        function createIcon(size = 512) {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Scale factor
+            const scale = size / 512;
+            ctx.save();
+            ctx.scale(scale, scale);
+            
+            // Background gradient
+            const bgGradient = ctx.createRadialGradient(256, 256, 0, 256, 256, 300);
+            bgGradient.addColorStop(0, '#2a2a2a');
+            bgGradient.addColorStop(1, '#1a1a1a');
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(0, 0, 512, 512);
+            
+            // Outer ring
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 12;
+            ctx.beginPath();
+            ctx.arc(256, 256, 220, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Inner circle
+            ctx.fillStyle = '#333';
+            ctx.beginPath();
+            ctx.arc(256, 256, 200, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Mixer faders (5 vertical faders)
+            const faderPositions = [160, 200, 240, 280, 320];
+            const faderHeights = [60, 80, 100, 70, 50]; // Different heights for visual interest
+            
+            faderPositions.forEach((x, i) => {
+                // Fader track
+                ctx.strokeStyle = '#555';
+                ctx.lineWidth = 8;
+                ctx.beginPath();
+                ctx.moveTo(x, 180);
+                ctx.lineTo(x, 320);
+                ctx.stroke();
+                
+                // Fader handle
+                const handleY = 180 + faderHeights[i];
+                ctx.fillStyle = '#4CAF50';
+                ctx.fillRect(x - 12, handleY, 24, 16);
+                
+                // Knob above fader
+                ctx.strokeStyle = '#4CAF50';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(x, 150, 12, 0, 2 * Math.PI);
+                ctx.stroke();
+                
+                // Knob indicator
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(x, 150);
+                ctx.lineTo(x + 8, 142);
+                ctx.stroke();
+            });
+            
+            // Sound waves at top
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 4;
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.arc(256, 100, 25 + (i * 15), 0, Math.PI);
+                ctx.stroke();
+            }
+            
+            // Sound waves at bottom
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.arc(256, 412, 25 + (i * 15), Math.PI, 2 * Math.PI);
+                ctx.stroke();
+            }
+            
+            // Center musical note
+            ctx.fillStyle = '#4CAF50';
+            ctx.beginPath();
+            ctx.arc(256, 256, 30, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Note stem
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(280, 200, 6, 70);
+            
+            // Note flag
+            ctx.beginPath();
+            ctx.moveTo(286, 200);
+            ctx.quadraticCurveTo(310, 190, 305, 225);
+            ctx.quadraticCurveTo(290, 215, 286, 220);
+            ctx.fill();
+            
+            // Highlight on note
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.beginPath();
+            ctx.arc(245, 235, 12, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // EQ bars at bottom
+            const eqBars = [
+                {x: 200, height: 15},
+                {x: 215, height: 25},
+                {x: 230, height: 35},
+                {x: 245, height: 30},
+                {x: 260, height: 40},
+                {x: 275, height: 25},
+                {x: 290, height: 20},
+                {x: 305, height: 15}
+            ];
+            
+            ctx.fillStyle = '#4CAF50';
+            eqBars.forEach(bar => {
+                ctx.fillRect(bar.x, 380 - bar.height, 8, bar.height);
+            });
+            
+            ctx.restore();
+        }
+        
+        function downloadIcon(filename, size = 512) {
+            // Create a temporary canvas for the specific size
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = size;
+            tempCanvas.height = size;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Draw the icon at the specified size
+            const originalCanvas = canvas;
+            canvas = tempCanvas;
+            ctx = tempCtx;
+            createIcon(size);
+            
+            // Download
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = tempCanvas.toDataURL('image/png');
+            link.click();
+            
+            // Restore original canvas
+            canvas = originalCanvas;
+            ctx = canvas.getContext('2d');
+        }
+        
+        // Create the initial icon
+        createIcon();
+    </script>
+    
+    <div style="margin-top: 20px;">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Click each download button to get different icon sizes</li>
+            <li>Save all files to your <code>assets/</code> folder</li>
+            <li>Rename the 512x512 version to <code>icon.png</code></li>
+            <li>Use online converters to create <code>icon.icns</code> (Mac) and <code>icon.ico</code> (Windows)</li>
+        </ol>
+        
+        <h3>Online Converters:</h3>
+        <ul>
+            <li><strong>PNG to ICNS:</strong> <a href="https://cloudconvert.com/png-to-icns" target="_blank">cloudconvert.com/png-to-icns</a></li>
+            <li><strong>PNG to ICO:</strong> <a href="https://convertio.co/png-ico/" target="_blank">convertio.co/png-ico/</a></li>
+        </ul>
+    </div>
+</body>
+</html>

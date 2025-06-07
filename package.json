@@ -102,20 +102,11 @@
       "category": "public.app-category.music",
       "target": [
         {
-          "target": "dmg",
-          "arch": ["x64", "arm64"]
-        },
-        {
           "target": "zip",
           "arch": ["x64", "arm64"]
         }
       ],
-      "icon": "assets/icon.icns",
-      "darkModeSupport": true,
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "assets/entitlements.mac.plist",
-      "entitlementsInherit": "assets/entitlements.mac.plist"
+      "darkModeSupport": true
     },
     "win": {
       "target": [
@@ -154,28 +145,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Professional Audio Mixer"
     },
-    "dmg": {
-      "title": "Professional Audio Mixer ${version}",
-      "icon": "assets/icon.icns",
-      "iconSize": 100,
-      "contents": [
-        {
-          "x": 130,
-          "y": 220,
-          "type": "file"
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ],
-      "window": {
-        "width": 540,
-        "height": 380
-      }
-    },
+
     "publish": {
       "provider": "github",
       "owner": "glitchlabs-eng",
