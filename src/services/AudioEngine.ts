@@ -7,6 +7,8 @@ import {
   AudioAnalyzer
 } from '@/types/audio';
 import { audioDeviceManager } from './AudioDeviceManager';
+import { AudioEffectsEngine, EffectProcessor } from './AudioEffectsEngine';
+import { AdvancedEQProcessor, EQBand } from './AdvancedEQProcessor';
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -16,6 +18,7 @@ export class AudioEngine {
   private eventListeners: ((event: AudioEngineEvent) => void)[] = [];
   private isInitialized = false;
   private animationFrameId: number | null = null;
+  private effectsEngine: AudioEffectsEngine | null = null;
 
   constructor(private config: AudioEngineConfig) {}
 
@@ -42,6 +45,9 @@ export class AudioEngine {
       this.analyzerNode = this.audioContext.createAnalyser();
       this.analyzerNode.fftSize = 2048;
       this.masterGainNode.connect(this.analyzerNode);
+
+      // Initialize effects engine
+      this.effectsEngine = new AudioEffectsEngine(this.audioContext);
 
       this.isInitialized = true;
       this.startLevelMonitoring();
@@ -184,6 +190,60 @@ export class AudioEngine {
     return audioDeviceManager.getOutputDevices();
   }
 
+  // Effects management
+  addEffect(channelId: string, effectType: string, effectId: string): EffectProcessor | null {
+    if (!this.effectsEngine) return null;
+
+    const processor = this.channels.get(channelId);
+    if (processor) {
+      const effect = this.effectsEngine.createEffect(effectType, effectId);
+      processor.addEffect(effect);
+      return effect;
+    }
+    return null;
+  }
+
+  updateEffect(effectId: string, parameters: Record<string, number>): void {
+    if (this.effectsEngine) {
+      const effect = this.effectsEngine.getEffect(effectId);
+      if (effect) {
+        effect.updateParameters(parameters);
+      }
+    }
+  }
+
+  removeEffect(channelId: string, effectId: string): void {
+    if (!this.effectsEngine) return;
+
+    const processor = this.channels.get(channelId);
+    if (processor) {
+      processor.removeEffect(effectId);
+      this.effectsEngine.removeEffect(effectId);
+    }
+  }
+
+  toggleEffect(effectId: string): void {
+    if (this.effectsEngine) {
+      const effect = this.effectsEngine.getEffect(effectId);
+      if (effect) {
+        effect.enabled = !effect.enabled;
+      }
+    }
+  }
+
+  // EQ management
+  updateChannelEQ(channelId: string, bands: EQBand[]): void {
+    const processor = this.channels.get(channelId);
+    if (processor) {
+      processor.updateAdvancedEQ(bands);
+    }
+  }
+
+  getChannelSpectrum(channelId: string): { frequencies: Float32Array; magnitudes: Float32Array } | null {
+    const processor = this.channels.get(channelId);
+    return processor ? processor.getSpectrumData() : null;
+  }
+
   addEventListener(listener: (event: AudioEngineEvent) => void): void {
     this.eventListeners.push(listener);
   }
@@ -249,6 +309,10 @@ class ChannelProcessor {
   private sourceNode: AudioBufferSourceNode | MediaStreamAudioSourceNode | null = null;
   private inputStream: MediaStream | null = null;
   private isPlaying: boolean = false;
+  private effectsChain: EffectProcessor[] = [];
+  private advancedEQ: AdvancedEQProcessor;
+  private effectsInputNode: GainNode;
+  private effectsOutputNode: GainNode;
 
   constructor(
     private audioContext: AudioContext,
@@ -257,13 +321,18 @@ class ChannelProcessor {
     this.gainNode = audioContext.createGain();
     this.panNode = audioContext.createStereoPanner();
     this.analyzerNode = audioContext.createAnalyser();
-    
+    this.effectsInputNode = audioContext.createGain();
+    this.effectsOutputNode = audioContext.createGain();
+
     // Create EQ nodes
     this.eqNodes = {
       high: audioContext.createBiquadFilter(),
       mid: audioContext.createBiquadFilter(),
       low: audioContext.createBiquadFilter(),
     };
+
+    // Create advanced EQ
+    this.advancedEQ = new AdvancedEQProcessor(audioContext);
 
     this.setupEQ();
     this.connectNodes();
@@ -286,12 +355,19 @@ class ChannelProcessor {
   }
 
   private connectNodes(): void {
-    // Connect EQ chain
+    // Connect basic EQ chain
     this.eqNodes.high.connect(this.eqNodes.mid);
     this.eqNodes.mid.connect(this.eqNodes.low);
-    this.eqNodes.low.connect(this.panNode);
-    
-    // Connect to gain and analyzer
+
+    // Connect to advanced EQ
+    this.eqNodes.low.connect(this.advancedEQ.process(this.eqNodes.low));
+
+    // Connect to effects chain
+    this.advancedEQ.process(this.eqNodes.low).connect(this.effectsInputNode);
+    this.effectsInputNode.connect(this.effectsOutputNode);
+
+    // Connect to pan and gain
+    this.effectsOutputNode.connect(this.panNode);
     this.panNode.connect(this.gainNode);
     this.gainNode.connect(this.analyzerNode);
   }
@@ -420,5 +496,54 @@ class ChannelProcessor {
     const clipping = peak >= 0.99;
 
     return { peak, rms, clipping };
+  }
+
+  // Effects management
+  addEffect(effect: EffectProcessor): void {
+    this.effectsChain.push(effect);
+    this.rebuildEffectsChain();
+  }
+
+  removeEffect(effectId: string): void {
+    this.effectsChain = this.effectsChain.filter(effect => effect.id !== effectId);
+    this.rebuildEffectsChain();
+  }
+
+  private rebuildEffectsChain(): void {
+    // Disconnect all effects
+    this.effectsChain.forEach(effect => effect.dispose());
+
+    // Reconnect effects in order
+    if (this.effectsChain.length === 0) {
+      this.effectsInputNode.connect(this.effectsOutputNode);
+    } else {
+      // Connect input to first effect
+      const firstEffect = this.effectsChain[0];
+      this.effectsInputNode.connect(firstEffect.process(this.effectsInputNode));
+
+      // Chain effects together
+      for (let i = 0; i < this.effectsChain.length - 1; i++) {
+        const currentEffect = this.effectsChain[i];
+        const nextEffect = this.effectsChain[i + 1];
+        currentEffect.process(this.effectsInputNode).connect(nextEffect.process(currentEffect.process(this.effectsInputNode)));
+      }
+
+      // Connect last effect to output
+      const lastEffect = this.effectsChain[this.effectsChain.length - 1];
+      lastEffect.process(this.effectsInputNode).connect(this.effectsOutputNode);
+    }
+  }
+
+  // Advanced EQ management
+  updateAdvancedEQ(bands: EQBand[]): void {
+    // Clear existing bands
+    bands.forEach(band => this.advancedEQ.removeBand(band.id));
+
+    // Add new bands
+    bands.forEach(band => this.advancedEQ.addBand(band));
+  }
+
+  getSpectrumData(): { frequencies: Float32Array; magnitudes: Float32Array } {
+    return this.advancedEQ.getSpectrumData();
   }
 }

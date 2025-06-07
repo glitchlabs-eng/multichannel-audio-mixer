@@ -45,6 +45,19 @@ export interface Effect {
   type: 'reverb' | 'delay' | 'compressor' | 'distortion' | 'chorus';
   enabled: boolean;
   parameters: Record<string, number>;
+  preset?: string;
+}
+
+export interface EffectPreset {
+  name: string;
+  type: string;
+  parameters: Record<string, number>;
+}
+
+export interface SpectrumData {
+  frequencies: Float32Array;
+  magnitudes: Float32Array;
+  phases?: Float32Array;
 }
 
 export interface EffectChain {
