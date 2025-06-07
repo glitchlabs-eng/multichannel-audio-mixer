@@ -58,7 +58,9 @@ const Button = styled.button<{ variant?: 'primary' | 'secondary' }>`
   }
 `;
 
-const StatusIndicator = styled.div<{ isReady: boolean }>`
+const StatusIndicator = styled.div.withConfig({
+  shouldForwardProp: (prop) => prop !== 'isReady',
+})<{ isReady: boolean }>`
   width: 12px;
   height: 12px;
   border-radius: 50%;
