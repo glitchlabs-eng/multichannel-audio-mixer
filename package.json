@@ -106,7 +106,9 @@
           "arch": ["x64", "arm64"]
         }
       ],
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "icon": "assets/icon.icns",
+      "artifactName": "Professional-Audio-Mixer-${version}-${arch}-mac.${ext}"
     },
     "win": {
       "target": [
